@@ -182,6 +182,7 @@ bool one_shot = false;
 volatile bool sweep_started = false;
 
 int fftSize = 20;
+unsigned int num_pwrs = 20;
 double fft_bin_width;
 fftwf_complex *fftwIn = NULL;
 fftwf_complex *fftwOut = NULL;
@@ -191,6 +192,7 @@ fftwf_complex *ifftwOut = NULL;
 fftwf_plan ifftwPlan = NULL;
 uint32_t ifft_idx = 0;
 float* pwr;
+struct pair* pwrs;
 float* window;
 
 float logPower(fftwf_complex in, float scale)
@@ -207,7 +209,7 @@ int rx_callback(hackrf_transfer* transfer) {
 	uint64_t frequency; /* in Hz */
 	uint64_t band_edge;
 	uint32_t record_length;
-	int i, j, ifft_bins;
+	int i, j, x, ifft_bins;
 	struct tm *fft_time;
 	char time_str[50];
 	struct timeval usb_transfer_time;
@@ -277,7 +279,18 @@ int rx_callback(hackrf_transfer* transfer) {
 		fftwf_execute(fftwPlan);
 		for (i=0; i < fftSize; i++) {
 			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
+			if (pwr[i] > pwrs[num_pwrs-1].second) {
+				x = num_pwrs;
+				while (x>0 && pwrs[x-1].second<pwr[i]) {
+					pwrs[x].first = pwrs[x-1].first;
+					pwrs[x].second = pwrs[x-1].second;
+		  		x--;
+				}
+				pwrs[x].first = frequency;
+				pwrs[x].second = pwr[i];
+			}
 		}
+
 		if(binary_output) {
 			record_length = 2 * sizeof(band_edge)
 					+ (fftSize/4) * sizeof(float);
@@ -323,6 +336,9 @@ int rx_callback(hackrf_transfer* transfer) {
 			for(i = 0; (fftSize / 4) > i; i++) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
 			}
+			for(i = 0; num_pwrs > i; i++) {
+				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
+			}
 			fprintf(fd, "\n");
 			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
 					time_str,
@@ -333,6 +349,9 @@ int rx_callback(hackrf_transfer* transfer) {
 					fftSize);
 			for(i = 0; (fftSize / 4) > i; i++) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
+			}
+			for(i = 0; num_pwrs > i; i++) {
+				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
 			}
 			fprintf(fd, "\n");
 		}
@@ -348,6 +367,7 @@ static void usage() {
 	fprintf(stderr, "\t[-f freq_min:freq_max] # minimum and maximum frequencies in MHz\n");
 	fprintf(stderr, "\t[-p antenna_enable] # Antenna port power, 1=Enable, 0=Disable\n");
 	fprintf(stderr, "\t[-l gain_db] # RX LNA (IF) gain, 0-40dB, 8dB steps\n");
+	fprintf(stderr, "\t[-t n] # top n power with frequency\n");
 	fprintf(stderr, "\t[-g gain_db] # RX VGA (baseband) gain, 0-62dB, 2dB steps\n");
 	fprintf(stderr, "\t[-n num_samples] # Number of samples per frequency, 8192-4294967296\n");
 	fprintf(stderr, "\t[-w bin_width] # FFT bin width (frequency resolution) in Hz\n");
@@ -357,7 +377,7 @@ static void usage() {
 	fprintf(stderr, "\t-r filename # output file\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Output fields:\n");
-	fprintf(stderr, "\tdate, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB, . . .\n");
+	fprintf(stderr, "\tdate, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB, . . .\n\t\ttop n freq, pwr\n");
 }
 
 static hackrf_device* device = NULL;
@@ -393,9 +413,9 @@ int main(int argc, char** argv) {
 	uint32_t requested_fft_bin_width;
 
 
-	while( (opt = getopt(argc, argv, "a:f:p:l:g:d:n:w:1BIr:h?")) != EOF ) {
+	while( (opt = getopt(argc, argv, "a:f:p:l:t:g:d:n:w:1BIr:h?")) != EOF ) {
 		result = HACKRF_SUCCESS;
-		switch( opt ) 
+		switch( opt )
 		{
 		case 'd':
 			serial_number = optarg;
@@ -442,6 +462,10 @@ int main(int argc, char** argv) {
 			result = parse_u32(optarg, &lna_gain);
 			break;
 
+		case 't':
+			result = parse_u32(optarg, &num_pwrs);
+			break;
+
 		case 'g':
 			result = parse_u32(optarg, &vga_gain);
 			break;
@@ -481,12 +505,12 @@ int main(int argc, char** argv) {
 			usage();
 			return EXIT_FAILURE;
 		}
-		
+
 		if( result != HACKRF_SUCCESS ) {
 			fprintf(stderr, "argument error: '-%c %s' %s (%d)\n", opt, optarg, hackrf_error_name(result), result);
 			usage();
 			return EXIT_FAILURE;
-		}		
+		}
 	}
 
 	if (lna_gain % 8)
@@ -562,9 +586,14 @@ int main(int argc, char** argv) {
 	fftwOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSize);
 	fftwPlan = fftwf_plan_dft_1d(fftSize, fftwIn, fftwOut, FFTW_FORWARD, FFTW_MEASURE);
 	pwr = (float*)fftwf_malloc(sizeof(float) * fftSize);
+	pwrs = (struct pair*)fftwf_malloc(sizeof(struct pair) * num_pwrs);
 	window = (float*)fftwf_malloc(sizeof(float) * fftSize);
 	for (i = 0; i < fftSize; i++) {
 		window[i] = (float) (0.5f * (1.0f - cos(2 * M_PI * i / (fftSize - 1))));
+	}
+	for (i=0; i < num_pwrs; i++) {
+		pwrs[i].first = 0;
+		pwrs[i].second = -100;
 	}
 
 	result = hackrf_init();
@@ -573,7 +602,7 @@ int main(int argc, char** argv) {
 		usage();
 		return EXIT_FAILURE;
 	}
-	
+
 	result = hackrf_open_by_serial(serial_number, &device);
 	if( result != HACKRF_SUCCESS ) {
 		fprintf(stderr, "hackrf_open() failed: %s (%d)\n", hackrf_error_name(result), result);
@@ -694,9 +723,9 @@ int main(int argc, char** argv) {
 	while((hackrf_is_streaming(device) == HACKRF_TRUE) && (do_exit == false)) {
 		float time_difference;
 		sleep(1);
-		
+
 		gettimeofday(&time_now, NULL);
-		
+
 		time_difference = TimevalDiff(&time_now, &t_start);
 		sweep_rate = (float)sweep_count / time_difference;
 		fprintf(stderr, "%" PRIu64 " total sweeps completed, %.2f sweeps/second\n",
@@ -710,7 +739,7 @@ int main(int argc, char** argv) {
 		byte_count = 0;
 	}
 
-	result = hackrf_is_streaming(device);	
+	result = hackrf_is_streaming(device);
 	if (do_exit) {
 		fprintf(stderr, "\nExiting...\n");
 	} else {
