@@ -279,6 +279,7 @@ int rx_callback(hackrf_transfer* transfer) {
 		fftwf_execute(fftwPlan);
 		for (i=0; i < fftSize; i++) {
 			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
+			//SOFWERX mod to store top n power/freq sets
 			if (pwr[i] > pwrs[num_pwrs-1].second) {
 				x = num_pwrs;
 				while (x>0 && pwrs[x-1].second<pwr[i]) {
@@ -336,6 +337,8 @@ int rx_callback(hackrf_transfer* transfer) {
 			for(i = 0; (fftSize / 4) > i; i++) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
 			}
+
+			//SOFWERX output collected data pairs
 			for(i = 0; num_pwrs > i; i++) {
 				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
 			}
@@ -350,6 +353,8 @@ int rx_callback(hackrf_transfer* transfer) {
 			for(i = 0; (fftSize / 4) > i; i++) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
 			}
+
+			//SOFWERX output collected data pairs
 			for(i = 0; num_pwrs > i; i++) {
 				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
 			}
@@ -367,7 +372,7 @@ static void usage() {
 	fprintf(stderr, "\t[-f freq_min:freq_max] # minimum and maximum frequencies in MHz\n");
 	fprintf(stderr, "\t[-p antenna_enable] # Antenna port power, 1=Enable, 0=Disable\n");
 	fprintf(stderr, "\t[-l gain_db] # RX LNA (IF) gain, 0-40dB, 8dB steps\n");
-	fprintf(stderr, "\t[-t n] # top n power with frequency\n");
+	fprintf(stderr, "\t[-t n] # top n power with frequency\n"); //SOFWERX mod to choose top n powers/freq sets
 	fprintf(stderr, "\t[-g gain_db] # RX VGA (baseband) gain, 0-62dB, 2dB steps\n");
 	fprintf(stderr, "\t[-n num_samples] # Number of samples per frequency, 8192-4294967296\n");
 	fprintf(stderr, "\t[-w bin_width] # FFT bin width (frequency resolution) in Hz\n");

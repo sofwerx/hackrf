@@ -133,6 +133,7 @@ struct hackrf_device_list {
 };
 typedef struct hackrf_device_list hackrf_device_list_t;
 
+//SOFWERX mod to create data structure to save collected data
 struct data_storage {
   //date, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB
   char time_str1[50];
@@ -144,6 +145,7 @@ struct data_storage {
   float* pwr1;
 };
 
+//SOFWERX create data structure for pair in C
 struct pair {
   uint64_t first;
   float second;
