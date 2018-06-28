@@ -192,7 +192,7 @@ fftwf_complex *ifftwOut = NULL;
 fftwf_plan ifftwPlan = NULL;
 uint32_t ifft_idx = 0;
 float* pwr;
-struct pair* pwrs;
+struct data_storage top;
 float* window;
 
 float logPower(fftwf_complex in, float scale)
@@ -279,16 +279,17 @@ int rx_callback(hackrf_transfer* transfer) {
 		fftwf_execute(fftwPlan);
 		for (i=0; i < fftSize; i++) {
 			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
+
 			//SOFWERX mod to store top n power/freq sets
-			if (pwr[i] > pwrs[num_pwrs-1].second) {
+			if (pwr[i] > top.pwrs[num_pwrs-1].second) {
 				x = num_pwrs;
-				while (x>0 && pwrs[x-1].second<pwr[i]) {
-					pwrs[x].first = pwrs[x-1].first;
-					pwrs[x].second = pwrs[x-1].second;
+				while (x>0 && top.pwrs[x-1].second<pwr[i]) {
+					top.pwrs[x].first = top.pwrs[x-1].first;
+					top.pwrs[x].second = top.pwrs[x-1].second;
 		  		x--;
 				}
-				pwrs[x].first = frequency;
-				pwrs[x].second = pwr[i];
+				top.pwrs[x].first = frequency;
+				top.pwrs[x].second = pwr[i];
 			}
 		}
 
@@ -338,10 +339,10 @@ int rx_callback(hackrf_transfer* transfer) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
 			}
 
-			//SOFWERX output collected data pairs
-			for(i = 0; num_pwrs > i; i++) {
-				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
-			}
+			// //SOFWERX output collected data pairs
+			// for(i = 0; num_pwrs > i; i++) {
+			// 	fprintf(fd, "\n\t %" PRIu64 ", %.3f", top.pwrs[i].first, top.pwrs[i].second);
+			// }
 			fprintf(fd, "\n");
 			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
 					time_str,
@@ -354,10 +355,6 @@ int rx_callback(hackrf_transfer* transfer) {
 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
 			}
 
-			//SOFWERX output collected data pairs
-			for(i = 0; num_pwrs > i; i++) {
-				fprintf(fd, "\n\t %" PRIu64 ", %.3f", pwrs[i].first, pwrs[i].second);
-			}
 			fprintf(fd, "\n");
 		}
 	}
@@ -591,14 +588,24 @@ int main(int argc, char** argv) {
 	fftwOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSize);
 	fftwPlan = fftwf_plan_dft_1d(fftSize, fftwIn, fftwOut, FFTW_FORWARD, FFTW_MEASURE);
 	pwr = (float*)fftwf_malloc(sizeof(float) * fftSize);
-	pwrs = (struct pair*)fftwf_malloc(sizeof(struct pair) * num_pwrs);
+	//SOFWERX allocate memory for freq/pwr array
+	top.pwrs = (pair*)fftwf_malloc(sizeof(pair) * num_pwrs);
 	window = (float*)fftwf_malloc(sizeof(float) * fftSize);
 	for (i = 0; i < fftSize; i++) {
 		window[i] = (float) (0.5f * (1.0f - cos(2 * M_PI * i / (fftSize - 1))));
 	}
+	//SOFWERX populate data_storage
+	//date, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB
+		  // top.time_str1 = time_start;
+		  // top.time_stamp1 = time_stamp.tv_usec;
+		  // top.start_freq1 = start_freq;
+		  // uint64_t end_freq1;
+		  // double bin_width1;
+		  // int fftSize1;
+	//SOFWERX initialize pwrs array
 	for (i=0; i < num_pwrs; i++) {
-		pwrs[i].first = 0;
-		pwrs[i].second = -100;
+		top.pwrs[i].first = 0;
+		top.pwrs[i].second = -100;
 	}
 
 	result = hackrf_init();
@@ -699,7 +706,6 @@ int main(int argc, char** argv) {
 			   hackrf_error_name(result), result);
 		return EXIT_FAILURE;
 	}
-
 	if (amp) {
 		fprintf(stderr, "call hackrf_set_amp_enable(%u)\n", amp_enable);
 		result = hackrf_set_amp_enable(device, (uint8_t)amp_enable);
@@ -757,6 +763,11 @@ int main(int argc, char** argv) {
 	fprintf(stderr, "Total sweeps: %" PRIu64 " in %.5f seconds (%.2f sweeps/second)\n",
 			sweep_count, time_diff, sweep_rate);
 
+	//SOFWERX output collected data pairs
+	for(i = 0; num_pwrs > i; i++) {
+		fprintf(fd, "\n\t %" PRIu64 ", %.3f", top.pwrs[i].first, top.pwrs[i].second);
+	}
+	
 	if(device != NULL) {
 		result = hackrf_stop_rx(device);
 		if(result != HACKRF_SUCCESS) {
