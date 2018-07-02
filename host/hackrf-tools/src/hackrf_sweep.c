@@ -209,7 +209,7 @@ int rx_callback(hackrf_transfer* transfer) {
 	uint64_t frequency; /* in Hz */
 	uint64_t band_edge;
 	uint32_t record_length;
-	int i, j, x, ifft_bins;
+	int i, j, x, count, ifft_bins;
 	struct tm *fft_time;
 	char time_str[50];
 	struct timeval usb_transfer_time;
@@ -275,9 +275,13 @@ int rx_callback(hackrf_transfer* transfer) {
 			fftwIn[i][0] = buf[i*2] * window[i] * 1.0f / 128.0f;
 			fftwIn[i][1] = buf[i*2+1] * window[i] * 1.0f / 128.0f;
 		}
+//        for(i=0; i < fftSize; i++) {
+//            fprintf(fd,"A:%f, b%f", fftwIn[i][0], fftwIn[i][1]);
+//		}
+
 		buf += fftSize * 2;
 		fftwf_execute(fftwPlan);
-		for (i=0; i < fftSize; i++) {
+		for (count=0, i=0; i < fftSize; i++, count++) {
 			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
 
 			//SOFWERX mod to store top n power/freq sets
@@ -288,7 +292,7 @@ int rx_callback(hackrf_transfer* transfer) {
 					top.pwrs[x].second = top.pwrs[x-1].second;
 		  		x--;
 				}
-				top.pwrs[x].first = frequency;
+				top.pwrs[x].first = frequency + count * top.bin_width1;
 				top.pwrs[x].second = pwr[i];
 			}
 		}
@@ -324,38 +328,39 @@ int rx_callback(hackrf_transfer* transfer) {
 				ifftwIn[ifft_idx + i][0] = fftwOut[i + 1 + (fftSize/8)][0];
 				ifftwIn[ifft_idx + i][1] = fftwOut[i + 1 + (fftSize/8)][1];
 			}
-		} else {
+		}
+      else {
 			time_t time_stamp_seconds = time_stamp.tv_sec;
 			fft_time = localtime(&time_stamp_seconds);
 			strftime(time_str, 50, "%Y-%m-%d, %H:%M:%S", fft_time);
-			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
-					time_str,
-					(long int)time_stamp.tv_usec,
-					(uint64_t)(frequency),
-					(uint64_t)(frequency+DEFAULT_SAMPLE_RATE_HZ/4),
-					fft_bin_width,
-					fftSize);
-			for(i = 0; (fftSize / 4) > i; i++) {
-				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
-			}
+//			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
+//					time_str,
+//					(long int)time_stamp.tv_usec,
+//					(uint64_t)(frequency),
+//					(uint64_t)(frequency+DEFAULT_SAMPLE_RATE_HZ/4),
+//					fft_bin_width,
+//					fftSize);
+//			for(i = 0; (fftSize / 4) > i; i++) {
+//				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
+//			}
 
 			// //SOFWERX output collected data pairs
 			// for(i = 0; num_pwrs > i; i++) {
 			// 	fprintf(fd, "\n\t %" PRIu64 ", %.3f", top.pwrs[i].first, top.pwrs[i].second);
 			// }
-			fprintf(fd, "\n");
-			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
-					time_str,
-					(long int)time_stamp.tv_usec,
-					(uint64_t)(frequency+(DEFAULT_SAMPLE_RATE_HZ/2)),
-					(uint64_t)(frequency+((DEFAULT_SAMPLE_RATE_HZ*3)/4)),
-					fft_bin_width,
-					fftSize);
-			for(i = 0; (fftSize / 4) > i; i++) {
-				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
-			}
+//			fprintf(fd, "\n");
+//			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
+//					time_str,
+//					(long int)time_stamp.tv_usec,
+//					(uint64_t)(frequency+(DEFAULT_SAMPLE_RATE_HZ/2)),
+//					(uint64_t)(frequency+((DEFAULT_SAMPLE_RATE_HZ*3)/4)),
+//					fft_bin_width,
+//					fftSize);
+//			for(i = 0; (fftSize / 4) > i; i++) {
+//				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
+//			}
 
-			fprintf(fd, "\n");
+//			fprintf(fd, "\n");
 		}
 	}
 	return 0;
@@ -596,12 +601,7 @@ int main(int argc, char** argv) {
 	}
 	//SOFWERX populate data_storage
 	//date, time, hz_low, hz_high, hz_bin_width, num_samples, dB, dB
-		  // top.time_str1 = time_start;
-		  // top.time_stamp1 = time_stamp.tv_usec;
-		  // top.start_freq1 = start_freq;
-		  // uint64_t end_freq1;
-		  // double bin_width1;
-		  // int fftSize1;
+      top.bin_width1 = fft_bin_width;
 	//SOFWERX initialize pwrs array
 	for (i=0; i < num_pwrs; i++) {
 		top.pwrs[i].first = 0;
@@ -764,8 +764,9 @@ int main(int argc, char** argv) {
 			sweep_count, time_diff, sweep_rate);
 
 	//SOFWERX output collected data pairs
+    fprintf(fd, "\n\t %ld \n", top.time_stamp1);
 	for(i = 0; num_pwrs > i; i++) {
-		fprintf(fd, "\n\t %" PRIu64 ", %.3f", top.pwrs[i].first, top.pwrs[i].second);
+		fprintf(fd, "\n\t %" PRIu64 ", %.2f", top.pwrs[i].first, top.pwrs[i].second);
 	}
 	
 	if(device != NULL) {
