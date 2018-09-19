@@ -23,31 +23,6 @@
 
 #include <hackrf.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <getopt.h>
-#include <time.h>
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <fftw3.h>
-#include <inttypes.h>
-
 int main(int argc, char** argv) {
-  int opt, i, result = 0;
-	const char* path = NULL;
-	const char* serial_number = NULL;
-	int exit_code = EXIT_SUCCESS;
-	struct timeval time_now;
-	float time_diff;
-	float sweep_rate;
-	unsigned int lna_gain=16, vga_gain=20;
-	uint32_t freq_min = 0;
-	uint32_t freq_max = 6000;
-	uint32_t requested_fft_bin_width;
-
   
 }

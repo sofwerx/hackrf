@@ -2013,7 +2013,7 @@ int gettimeofday(struct timeval *tv, void* ignored) {
 
 #define FD_BUFFER_SIZE (8*1024)
 
-#define FREQ_ONE_MHZ (1000000ull)
+//#define FREQ_ONE_MHZ (1000000ull)
 
 #define FREQ_MIN_MHZ (0)    /*    0 MHz */
 #define FREQ_MAX_MHZ (7250) /* 7250 MHz */
@@ -2086,7 +2086,7 @@ int parse_u32_range(char* s, uint32_t* const value_min, uint32_t* const value_ma
 	return HACKRF_SUCCESS;
 }
 
-volatile bool do_exit = false;
+//volatile bool do_exit = false;
 
 FILE* fd = NULL;
 volatile uint32_t byte_count = 0;
@@ -2319,7 +2319,7 @@ int ADDCALL hackrf_sweeper(int count, char** options) {
 	uint32_t requested_fft_bin_width;
 
 
-	while( (opt = getopt(argc, argv, "a:f:p:l:g:d:n:w:1BIr:h?")) != EOF ) {
+	while( (opt = getopt(count, options, "a:f:p:l:g:d:n:w:1BIr:h?")) != EOF ) {
 		result = HACKRF_SUCCESS;
 		switch( opt )
 		{
