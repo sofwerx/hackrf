@@ -41,8 +41,8 @@ if(MSVC)
 	    ../getopt/getopt.c
 	)
 	LIST(APPEND TOOLS_LINK_LIBS ${FFTW_LIBRARIES})
-else()
-    LIST(APPEND TOOLS_LINK_LIBS m fftw3f)
+	#else()
+	LIST(APPEND TOOLS_LINK_LIBS m fftw3f)
 endif()
 
 if(NOT libhackrf_SOURCE_DIR)

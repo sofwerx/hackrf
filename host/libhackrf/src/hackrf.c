@@ -2119,153 +2119,153 @@ uint32_t ifft_idx = 0;
 float* pwr;
 float* window;
 
-float logPower(fftwf_complex in, float scale)
-{
-	float re = in[0] * scale;
-	float im = in[1] * scale;
-	float magsq = re * re + im * im;
-	return (float) (log2(magsq) * 10.0f / log2(10.0f));
-}
-
-int rx_callback(hackrf_transfer* transfer) {
-	int8_t* buf;
-	uint8_t* ubuf;
-	uint64_t frequency; /* in Hz */
-	uint64_t band_edge;
-	uint32_t record_length;
-	int i, j, ifft_bins;
-	struct tm *fft_time;
-	char time_str[50];
-	struct timeval usb_transfer_time;
-
-	if(NULL == fd) {
-		return -1;
-	}
-
-	gettimeofday(&usb_transfer_time, NULL);
-	byte_count += transfer->valid_length;
-	buf = (int8_t*) transfer->buffer;
-	ifft_bins = fftSize * step_count;
-	for(j=0; j<BLOCKS_PER_TRANSFER; j++) {
-		ubuf = (uint8_t*) buf;
-		if(ubuf[0] == 0x7F && ubuf[1] == 0x7F) {
-			frequency = ((uint64_t)(ubuf[9]) << 56) | ((uint64_t)(ubuf[8]) << 48) | ((uint64_t)(ubuf[7]) << 40)
-					| ((uint64_t)(ubuf[6]) << 32) | ((uint64_t)(ubuf[5]) << 24) | ((uint64_t)(ubuf[4]) << 16)
-					| ((uint64_t)(ubuf[3]) << 8) | ubuf[2];
-		} else {
-			buf += BYTES_PER_BLOCK;
-			continue;
-		}
-		if (frequency == (uint64_t)(FREQ_ONE_MHZ*frequencies[0])) {
-			if(sweep_started) {
-				if(ifft_output) {
-					fftwf_execute(ifftwPlan);
-					for(i=0; i < ifft_bins; i++) {
-						ifftwOut[i][0] *= 1.0f / ifft_bins;
-						ifftwOut[i][1] *= 1.0f / ifft_bins;
-						fwrite(&ifftwOut[i][0], sizeof(float), 1, fd);
-						fwrite(&ifftwOut[i][1], sizeof(float), 1, fd);
-					}
-				}
-				sweep_count++;
-				if(one_shot) {
-					do_exit = true;
-				}
-			}
-			sweep_started = true;
-			time_stamp = usb_transfer_time;
-			time_stamp.tv_usec +=
-					(uint64_t)(num_samples + THROWAWAY_BLOCKS * SAMPLES_PER_BLOCK)
-					* j * FREQ_ONE_MHZ / DEFAULT_SAMPLE_RATE_HZ;
-			if(999999 < time_stamp.tv_usec) {
-				time_stamp.tv_sec += time_stamp.tv_usec / 1000000;
-				time_stamp.tv_usec = time_stamp.tv_usec % 1000000;
-			}
-		}
-		if(do_exit) {
-			return 0;
-		}
-		if(!sweep_started) {
-			buf += BYTES_PER_BLOCK;
-			continue;
-		}
-		if((FREQ_MAX_MHZ * FREQ_ONE_MHZ) < frequency) {
-			buf += BYTES_PER_BLOCK;
-			continue;
-		}
-		/* copy to fftwIn as floats */
-		buf += BYTES_PER_BLOCK - (fftSize * 2);
-		for(i=0; i < fftSize; i++) {
-			fftwIn[i][0] = buf[i*2] * window[i] * 1.0f / 128.0f;
-			fftwIn[i][1] = buf[i*2+1] * window[i] * 1.0f / 128.0f;
-		}
-		buf += fftSize * 2;
-		fftwf_execute(fftwPlan);
-		for (i=0; i < fftSize; i++) {
-			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
-		}
-		if(binary_output) {
-			record_length = 2 * sizeof(band_edge)
-					+ (fftSize/4) * sizeof(float);
-
-			fwrite(&record_length, sizeof(record_length), 1, fd);
-			band_edge = frequency;
-			fwrite(&band_edge, sizeof(band_edge), 1, fd);
-			band_edge = frequency + DEFAULT_SAMPLE_RATE_HZ / 4;
-			fwrite(&band_edge, sizeof(band_edge), 1, fd);
-			fwrite(&pwr[1+(fftSize*5)/8], sizeof(float), fftSize/4, fd);
-
-			fwrite(&record_length, sizeof(record_length), 1, fd);
-			band_edge = frequency + DEFAULT_SAMPLE_RATE_HZ / 2;
-			fwrite(&band_edge, sizeof(band_edge), 1, fd);
-			band_edge = frequency + (DEFAULT_SAMPLE_RATE_HZ * 3) / 4;
-			fwrite(&band_edge, sizeof(band_edge), 1, fd);
-			fwrite(&pwr[1+fftSize/8], sizeof(float), fftSize/4, fd);
-		} else if(ifft_output) {
-			ifft_idx = (uint32_t) round((frequency - (uint64_t)(FREQ_ONE_MHZ*frequencies[0]))
-					/ fft_bin_width);
-			ifft_idx = (ifft_idx + ifft_bins/2) % ifft_bins;
-			for(i = 0; (fftSize / 4) > i; i++) {
-				ifftwIn[ifft_idx + i][0] = fftwOut[i + 1 + (fftSize*5)/8][0];
-				ifftwIn[ifft_idx + i][1] = fftwOut[i + 1 + (fftSize*5)/8][1];
-			}
-			ifft_idx += fftSize / 2;
-			ifft_idx %= ifft_bins;
-			for(i = 0; (fftSize / 4) > i; i++) {
-				ifftwIn[ifft_idx + i][0] = fftwOut[i + 1 + (fftSize/8)][0];
-				ifftwIn[ifft_idx + i][1] = fftwOut[i + 1 + (fftSize/8)][1];
-			}
-		} else {
-			time_t time_stamp_seconds = time_stamp.tv_sec;
-			fft_time = localtime(&time_stamp_seconds);
-			strftime(time_str, 50, "%Y-%m-%d, %H:%M:%S", fft_time);
-			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
-					time_str,
-					(long int)time_stamp.tv_usec,
-					(uint64_t)(frequency),
-					(uint64_t)(frequency+DEFAULT_SAMPLE_RATE_HZ/4),
-					fft_bin_width,
-					fftSize);
-			for(i = 0; (fftSize / 4) > i; i++) {
-				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
-			}
-			fprintf(fd, "\n");
-			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
-					time_str,
-					(long int)time_stamp.tv_usec,
-					(uint64_t)(frequency+(DEFAULT_SAMPLE_RATE_HZ/2)),
-					(uint64_t)(frequency+((DEFAULT_SAMPLE_RATE_HZ*3)/4)),
-					fft_bin_width,
-					fftSize);
-			for(i = 0; (fftSize / 4) > i; i++) {
-				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
-			}
-			fprintf(fd, "\n");
-		}
-	}
-	return 0;
-}
-
+// float logPower(fftwf_complex in, float scale)
+// {
+// 	float re = in[0] * scale;
+// 	float im = in[1] * scale;
+// 	float magsq = re * re + im * im;
+// 	return (float) (log2(magsq) * 10.0f / log2(10.0f));
+// }
+//
+// int rx_callback(hackrf_transfer* transfer) {
+// 	int8_t* buf;
+// 	uint8_t* ubuf;
+// 	uint64_t frequency; /* in Hz */
+// 	uint64_t band_edge;
+// 	uint32_t record_length;
+// 	int i, j, ifft_bins;
+// 	struct tm *fft_time;
+// 	char time_str[50];
+// 	struct timeval usb_transfer_time;
+//
+// 	if(NULL == fd) {
+// 		return -1;
+// 	}
+//
+// 	gettimeofday(&usb_transfer_time, NULL);
+// 	byte_count += transfer->valid_length;
+// 	buf = (int8_t*) transfer->buffer;
+// 	ifft_bins = fftSize * step_count;
+// 	for(j=0; j<BLOCKS_PER_TRANSFER; j++) {
+// 		ubuf = (uint8_t*) buf;
+// 		if(ubuf[0] == 0x7F && ubuf[1] == 0x7F) {
+// 			frequency = ((uint64_t)(ubuf[9]) << 56) | ((uint64_t)(ubuf[8]) << 48) | ((uint64_t)(ubuf[7]) << 40)
+// 					| ((uint64_t)(ubuf[6]) << 32) | ((uint64_t)(ubuf[5]) << 24) | ((uint64_t)(ubuf[4]) << 16)
+// 					| ((uint64_t)(ubuf[3]) << 8) | ubuf[2];
+// 		} else {
+// 			buf += BYTES_PER_BLOCK;
+// 			continue;
+// 		}
+// 		if (frequency == (uint64_t)(FREQ_ONE_MHZ*frequencies[0])) {
+// 			if(sweep_started) {
+// 				if(ifft_output) {
+// 					fftwf_execute(ifftwPlan);
+// 					for(i=0; i < ifft_bins; i++) {
+// 						ifftwOut[i][0] *= 1.0f / ifft_bins;
+// 						ifftwOut[i][1] *= 1.0f / ifft_bins;
+// 						fwrite(&ifftwOut[i][0], sizeof(float), 1, fd);
+// 						fwrite(&ifftwOut[i][1], sizeof(float), 1, fd);
+// 					}
+// 				}
+// 				sweep_count++;
+// 				if(one_shot) {
+// 					do_exit = true;
+// 				}
+// 			}
+// 			sweep_started = true;
+// 			time_stamp = usb_transfer_time;
+// 			time_stamp.tv_usec +=
+// 					(uint64_t)(num_samples + THROWAWAY_BLOCKS * SAMPLES_PER_BLOCK)
+// 					* j * FREQ_ONE_MHZ / DEFAULT_SAMPLE_RATE_HZ;
+// 			if(999999 < time_stamp.tv_usec) {
+// 				time_stamp.tv_sec += time_stamp.tv_usec / 1000000;
+// 				time_stamp.tv_usec = time_stamp.tv_usec % 1000000;
+// 			}
+// 		}
+// 		if(do_exit) {
+// 			return 0;
+// 		}
+// 		if(!sweep_started) {
+// 			buf += BYTES_PER_BLOCK;
+// 			continue;
+// 		}
+// 		if((FREQ_MAX_MHZ * FREQ_ONE_MHZ) < frequency) {
+// 			buf += BYTES_PER_BLOCK;
+// 			continue;
+// 		}
+// 		/* copy to fftwIn as floats */
+// 		buf += BYTES_PER_BLOCK - (fftSize * 2);
+// 		for(i=0; i < fftSize; i++) {
+// 			fftwIn[i][0] = buf[i*2] * window[i] * 1.0f / 128.0f;
+// 			fftwIn[i][1] = buf[i*2+1] * window[i] * 1.0f / 128.0f;
+// 		}
+// 		buf += fftSize * 2;
+// 		fftwf_execute(fftwPlan);
+// 		for (i=0; i < fftSize; i++) {
+// 			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
+// 		}
+// 		if(binary_output) {
+// 			record_length = 2 * sizeof(band_edge)
+// 					+ (fftSize/4) * sizeof(float);
+//
+// 			fwrite(&record_length, sizeof(record_length), 1, fd);
+// 			band_edge = frequency;
+// 			fwrite(&band_edge, sizeof(band_edge), 1, fd);
+// 			band_edge = frequency + DEFAULT_SAMPLE_RATE_HZ / 4;
+// 			fwrite(&band_edge, sizeof(band_edge), 1, fd);
+// 			fwrite(&pwr[1+(fftSize*5)/8], sizeof(float), fftSize/4, fd);
+//
+// 			fwrite(&record_length, sizeof(record_length), 1, fd);
+// 			band_edge = frequency + DEFAULT_SAMPLE_RATE_HZ / 2;
+// 			fwrite(&band_edge, sizeof(band_edge), 1, fd);
+// 			band_edge = frequency + (DEFAULT_SAMPLE_RATE_HZ * 3) / 4;
+// 			fwrite(&band_edge, sizeof(band_edge), 1, fd);
+// 			fwrite(&pwr[1+fftSize/8], sizeof(float), fftSize/4, fd);
+// 		} else if(ifft_output) {
+// 			ifft_idx = (uint32_t) round((frequency - (uint64_t)(FREQ_ONE_MHZ*frequencies[0]))
+// 					/ fft_bin_width);
+// 			ifft_idx = (ifft_idx + ifft_bins/2) % ifft_bins;
+// 			for(i = 0; (fftSize / 4) > i; i++) {
+// 				ifftwIn[ifft_idx + i][0] = fftwOut[i + 1 + (fftSize*5)/8][0];
+// 				ifftwIn[ifft_idx + i][1] = fftwOut[i + 1 + (fftSize*5)/8][1];
+// 			}
+// 			ifft_idx += fftSize / 2;
+// 			ifft_idx %= ifft_bins;
+// 			for(i = 0; (fftSize / 4) > i; i++) {
+// 				ifftwIn[ifft_idx + i][0] = fftwOut[i + 1 + (fftSize/8)][0];
+// 				ifftwIn[ifft_idx + i][1] = fftwOut[i + 1 + (fftSize/8)][1];
+// 			}
+// 		} else {
+// 			time_t time_stamp_seconds = time_stamp.tv_sec;
+// 			fft_time = localtime(&time_stamp_seconds);
+// 			strftime(time_str, 50, "%Y-%m-%d, %H:%M:%S", fft_time);
+// 			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
+// 					time_str,
+// 					(long int)time_stamp.tv_usec,
+// 					(uint64_t)(frequency),
+// 					(uint64_t)(frequency+DEFAULT_SAMPLE_RATE_HZ/4),
+// 					fft_bin_width,
+// 					fftSize);
+// 			for(i = 0; (fftSize / 4) > i; i++) {
+// 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize*5)/8]);
+// 			}
+// 			fprintf(fd, "\n");
+// 			fprintf(fd, "%s.%06ld, %" PRIu64 ", %" PRIu64 ", %.2f, %u",
+// 					time_str,
+// 					(long int)time_stamp.tv_usec,
+// 					(uint64_t)(frequency+(DEFAULT_SAMPLE_RATE_HZ/2)),
+// 					(uint64_t)(frequency+((DEFAULT_SAMPLE_RATE_HZ*3)/4)),
+// 					fft_bin_width,
+// 					fftSize);
+// 			for(i = 0; (fftSize / 4) > i; i++) {
+// 				fprintf(fd, ", %.2f", pwr[i + 1 + (fftSize/8)]);
+// 			}
+// 			fprintf(fd, "\n");
+// 		}
+// 	}
+// 	return 0;
+// }
+//
 static void usage() {
 	fprintf(stderr, "Usage:\n");
 	fprintf(stderr, "\t[-h] # this help\n");
@@ -2684,6 +2684,10 @@ int ADDCALL hackrf_sweeper(int count, char** options) {
 	fprintf(stderr, "exit\n");
 	return exit_code;
 	}
+
+/********************************************************************
+** Turning the Hackrf_sweep program into a function in the library **
+********************************************************************/
 
 /* Retrieve list of Operacake board addresses
  * boards must be *uint8_t[8]

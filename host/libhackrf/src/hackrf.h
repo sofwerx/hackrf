@@ -25,6 +25,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #define __HACKRF_H__
 
 #include <stdint.h>
+#include <fftw3.h>
 
 #ifdef _WIN32
    #define ADD_EXPORTS
