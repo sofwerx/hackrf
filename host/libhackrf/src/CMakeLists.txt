@@ -36,6 +36,7 @@ if(MSVC)
 	set_target_properties(hackrf-static PROPERTIES OUTPUT_NAME "hackrf_static")
 else()
 	set_target_properties(hackrf-static PROPERTIES OUTPUT_NAME "hackrf")
+	LIST(APPEND TOOLS_LINK_LIBS m fftw3f)
 endif()
 
 set_target_properties(hackrf PROPERTIES CLEAN_DIRECT_OUTPUT 1)

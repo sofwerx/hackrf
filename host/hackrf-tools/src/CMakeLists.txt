@@ -41,7 +41,7 @@ if(MSVC)
 	    ../getopt/getopt.c
 	)
 	LIST(APPEND TOOLS_LINK_LIBS ${FFTW_LIBRARIES})
-	#else()
+else()
 	LIST(APPEND TOOLS_LINK_LIBS m fftw3f)
 endif()
 
